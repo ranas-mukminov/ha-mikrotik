@@ -1,3 +1,28 @@
+# ============================================================================
+# ha_startup.script - HA Startup and Interface Initialization Script
+# ============================================================================
+# Purpose: Run at boot to initialize HA configuration and determine router role
+# Tested RouterOS: 6.44.6
+#
+# DANGEROUS OPERATIONS:
+#   - DISABLES ALL ETHERNET INTERFACES on startup (line 38, 90-91)
+#   - REBOOTS ROUTER if MAC address is unknown/wrong (line 138)
+#   - Creates bridge interfaces and modifies network configuration
+#   - Modifies firewall rules, VRRP, schedulers, and services
+#   - Creates/modifies FTP service and HA user account
+#
+# Behavior:
+#   - Prevents double-running via haStartupHasRun and haAllowBootstrap checks
+#   - Waits for hardware initialization (up to 120 retries)
+#   - Identifies router as A or B based on ether8 MAC address
+#   - Disables interfaces to prevent traffic on standby during boot
+#   - Sets up VRRP, firewall rules, schedulers, and HA services
+#
+# Prerequisites:
+#   - Proper HA configuration via ha_config
+#   - Serial console access in case of issues
+# ============================================================================
+
 #:do {
 #Prevent double running of the startup. Is there a bug in the scheduler? It seems that sometimes our start-time=startup ha_startup
 #fires again on newer versions of RouterOS.
@@ -34,7 +59,8 @@
 #Disable bonding to avoid flapping during startup
 /interface bonding disable [find disabled=no]
 /log warning "ha_startup: 0.3"
-#Finally take care about all ethernet interfaces
+# DANGEROUS: Disable all ethernet interfaces to prevent standby from taking traffic
+# This is critical to avoid race condition where standby forwards packets before role is determined
 /interface ethernet disable [find disabled=no]
 :global haStartupHAVersion "%%%HA_VERSION%%%"
 :global isStandbyInSync false
@@ -135,6 +161,8 @@
       :global haIdentity "UKNOWN"
       /log warning "I AM UNKNOWN - WRONG MAC"
       /delay 15
+      # DANGEROUS: Automatic reboot when MAC address doesn't match expected values
+      # This attempts to recover from hardware initialization race condition
       :execute "/system reboot"
       /delay 1000
    }
