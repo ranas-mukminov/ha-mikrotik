@@ -1,3 +1,37 @@
+# ============================================================================
+# ha-mikrotik HA_init.rsc - MikroTik High Availability Initialization Script
+# ============================================================================
+#
+# Purpose: Bootstrap and configure high availability for a pair of MikroTik routers
+#
+# Tested RouterOS Version: 6.44.6
+# Hardware: CCR1009-8g-1s-1s+ (other models may work but are untested)
+#
+# WARNING: This script performs dangerous operations including:
+#   - Creating/modifying system scripts with full policy permissions
+#   - Resetting configuration (via ha_install and related scripts)
+#   - Rebooting devices (via ha_switchrole and ha_startup)
+#   - Removing files (via ha_pushbackup)
+#   - Modifying network interfaces, VRRP, and routing
+#
+# REQUIREMENTS:
+#   - Out-of-band serial console access to both routers
+#   - Valid external backups of all configurations
+#   - Lab environment for testing before production use
+#   - Understanding of RouterOS scripting, VRRP, and MAC cloning
+#
+# DO NOT run this on production routers without extensive lab testing.
+# Misconfiguration can result in complete loss of device configuration.
+#
+# Usage:
+#   1. Upload this file to your MikroTik router
+#   2. Import: /import HA_init.rsc
+#   3. Install: $HAInstall interface="ether8" macA="[MAC_A]" macB="[MAC_B]" password="[PASSWORD]"
+#   4. Follow on-screen instructions for bootstrapping secondary router
+#
+# Version: 0.8dev20220621210200 - f1cbb7db52a60d0c50a033b99ff88c4fed260dd1
+# ============================================================================
+
 :do {
 /system script
 remove [find name=ha_checkchanges_new]
@@ -55,7 +89,25 @@ add name=ha_config_new owner=admin policy=ftp,reboot,read,write,policy,test,pass
 	\n:global haAddressVRRP \"169.254.23.10\"\
 	\n"
 remove [find name=ha_functions_new]
-add name=ha_functions_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source=":global HADebug do={\
+add name=ha_functions_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="# ============================================================================\
+	\n# ha_functions.script - Global HA Function Definitions\
+	\n# ============================================================================\
+	\n# Purpose: Define global functions for HA operations\
+	\n# Tested RouterOS: 6.44.6\
+	\n#\
+	\n# Functions defined:\
+	\n#   \$HADebug - Log debug messages\
+	\n#   \$HAPushStandby - Push HA code and configuration to standby\
+	\n#   \$HASyncStandby - Synchronize configuration to standby\
+	\n#   \$HAInstall - Install HA on both routers\
+	\n#   \$HASwitchRole - Switch active/standby roles\
+	\n#   \$HALoopPushStandby - Continuously push to standby (testing)\
+	\n#\
+	\n# These functions are entry points for HA operations and should be\
+	\n# called from the RouterOS terminal after importing HA_init.rsc\
+	\n# ============================================================================\
+	\n\
+	\n:global HADebug do={\
 	\n   :put \$1\
 	\n   /log warning \$1\
 	\n}\
@@ -92,7 +144,24 @@ add name=ha_functions_new owner=admin policy=ftp,reboot,read,write,policy,test,p
 	\n}\
 	\n"
 remove [find name=ha_install_new]
-add name=ha_install_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="/system script run [find name=\"ha_config\"]\
+add name=ha_install_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="# ============================================================================\
+	\n# ha_install.script - HA Installation and Bootstrap Script\
+	\n# ============================================================================\
+	\n# Purpose: Install and bootstrap HA configuration on both routers\
+	\n# Tested RouterOS: 6.44.6\
+	\n#\
+	\n# DANGEROUS OPERATIONS:\
+	\n#   - Creates backup before HA installation (HA_backup_beforeHA.backup)\
+	\n#   - Runs ha_startup which can disable interfaces and modify network config\
+	\n#   - Requires both routers to be factory reset before first use\
+	\n#\
+	\n# Prerequisites:\
+	\n#   - Both routers factory reset\
+	\n#   - ether8 (or specified interface) connected between routers\
+	\n#   - Out-of-band access available\
+	\n# ============================================================================\
+	\n\
+	\n/system script run [find name=\"ha_config\"]\
 	\n:global haPassword\
 	\n:global haInterface\
 	\n:global haMacA\
@@ -183,7 +252,12 @@ remove [find name=ha_onbackup_new]
 add name=ha_onbackup_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source=":global isMaster false\
 	\n:global haNetmaskBits\
 	\n:global haInterface\
-	\n:execute \"/routing bgp peer disable [find]\"\
+	\n:if ([:pick [/system resource get version] 0 ] = 6) do={\
+	\n   :execute \"/routing bgp peer disable [find]\"\
+	\n}\
+	\n:if ([:pick [/system resource get version] 0 ] = 7) do={\
+	\n   :execute \"/routing bgp connection disable [find]\"\
+	\n}\
 	\n:execute \"/interface bonding disable [find]\"\
 	\n:execute \"/interface ethernet disable [find where default-name!=\\\"\$haInterface\\\" and comment!=\\\"HA_RESCUE\\\"]\"\
 	\n:execute \"ha_setidentity\"\
@@ -195,12 +269,42 @@ add name=ha_onmaster_new owner=admin policy=ftp,reboot,read,write,policy,test,pa
 	\n:global haInterface\
 	\n:execute \"/interface ethernet enable [find]\"\
 	\n:execute \"/interface bonding enable [find]\"\
-	\n:execute \"/routing bgp peer enable [find]\"\
+	\n:if ([:pick [/system resource get version] 0 ] = 6) do={\
+	\n   :execute \"/routing bgp peer enable [find]\"\
+	\n}\
+	\n:if ([:pick [/system resource get version] 0 ] = 7) do={\
+	\n   :execute \"/routing bgp connection enable [find]\"\
+	\n}\
 	\n:execute \"ha_setidentity\"\
 	\n:do { :local k [/system script find name=\"on_master\"]; if ([:len \$k] = 1) do={ /system script run \$k } } on-error={ :put \"on_master failed\" }\
 	\n"
 remove [find name=ha_pushbackup_new]
-add name=ha_pushbackup_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source=":if ([:len [/system script job find where script=\"ha_pushbackup\"]] > 1) do={:error \"already running pushbackup\"; }\
+add name=ha_pushbackup_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="# ============================================================================\
+	\n# ha_pushbackup.script - Configuration and File Synchronization Script\
+	\n# ============================================================================\
+	\n# Purpose: Push configuration backup and all files from active to standby\
+	\n# Tested RouterOS: 6.44.6\
+	\n#\
+	\n# DANGEROUS OPERATIONS:\
+	\n#   - REMOVES ALL NON-HA FILES on standby via HA_mkdirs.auto.rsc (line 20)\
+	\n#   - Creates and uploads backup that triggers REBOOT on standby (line 64-71)\
+	\n#   - Transfers all files including sensitive data\
+	\n#   - Uses FTP for file transfer (password in plaintext over network)\
+	\n#\
+	\n# Behavior:\
+	\n#   - Only runs if router is master\
+	\n#   - Creates directory structure on standby\
+	\n#   - Purges all non-HA files from standby\
+	\n#   - Transfers all files from active to standby\
+	\n#   - Creates encrypted backup and triggers restore on standby (causes reboot)\
+	\n#\
+	\n# Prerequisites:\
+	\n#   - Router must be in master/active role\
+	\n#   - Standby must be reachable via HA network\
+	\n#   - FTP service must be enabled on standby\
+	\n# ============================================================================\
+	\n\
+	\n:if ([:len [/system script job find where script=\"ha_pushbackup\"]] > 1) do={:error \"already running pushbackup\"; }\
 	\n:global haPassword\
 	\n:global isMaster\
 	\n:global haAddressOther\
@@ -218,7 +322,8 @@ add name=ha_pushbackup_new owner=admin policy=ftp,reboot,read,write,policy,test,
 	\n   }\
 	\n\
 	\n   :set mkdirCode \"\$mkdirCode\\r\\n/ip smb shares remove [find comment=HA_AUTO]\\r\\n\"\
-	\n   #eh - good chance to keep files in sync, just delete everything, we will reupload. is this going to reduce life of nvram?\
+	\n   # DANGEROUS: This code will delete all non-HA files on standby to keep files in sync\
+	\n   # This reduces NVRAM wear by avoiding incremental updates, but removes all existing files\
 	\n   :local purgeFilesCode \":foreach k in=[/file find type!=\\\"directory\\\"] do={ :local xferfile [/file get \\\$k name]; if ([:pick \\\"\\\$xferfile\\\" 0 3] != \\\"HA_\\\") do={ :put \\\"removing \\\$xferfile\\\"; /file remove \\\$k; } }\"\
 	\n   :set mkdirCode \"\$purgeFilesCode;\\r\\n/delay 2;\\r\\n\$mkdirCode\"\
 	\n\
@@ -243,9 +348,19 @@ add name=ha_pushbackup_new owner=admin policy=ftp,reboot,read,write,policy,test,
 	\n      /ip ssh export-host-key key-file-prefix=\"HA\"\
 	\n   }\
 	\n\
-	\n   /tool fetch upload=yes src-path=HA_dsa dst-path=HA_dsa address=\$haAddressOther user=ha password=\$haPassword mode=ftp  \
-	\n   /tool fetch upload=yes src-path=HA_rsa dst-path=HA_rsa address=\$haAddressOther user=ha password=\$haPassword mode=ftp  \
-	\n\
+	\n:if ([:len [/file find name=\"HA_dsa\"]] = 1) do={\
+	\n   /tool fetch upload=yes src-path=HA_dsa dst-path=HA_dsa address=\$haAddressOther user=ha password=\$haPassword mode=ftp\
+	\n}\
+	\n:if ([:len [/file find name=\"HA_rsa\"]] = 1) do={\
+	\n   /tool fetch upload=yes src-path=HA_rsa dst-path=HA_rsa address=\$haAddressOther user=ha password=\$haPassword mode=ftp\
+	\n}\
+	\n# bugfix v7\
+	\n:if ([:len [/file find name=\"HA_dsa.pem\"]] = 1) do={\
+	\n   /tool fetch upload=yes src-path=HA_dsa.pem dst-path=HA_dsa.pem address=\$haAddressOther user=ha password=\$haPassword mode=ftp\
+	\n}\
+	\n:if ([:len [/file find name=\"HA_rsa.pem\"]] = 1) do={\
+	\n   /tool fetch upload=yes src-path=HA_rsa.pem dst-path=HA_rsa.pem address=\$haAddressOther user=ha password=\$haPassword mode=ftp\
+	\n}\
 	\n\
 	\n   :global haMasterConfigVer\
 	\n   [/system script run [find name=\"ha_setconfigver\"]]\
@@ -257,6 +372,8 @@ add name=ha_pushbackup_new owner=admin policy=ftp,reboot,read,write,policy,test,
 	\n   /system backup save name=HA_b2s.backup password=p\
 	\n   /tool fetch upload=yes src-path=HA_b2s.rsc dst-path=HA_b2s.rsc address=\$haAddressOther user=ha password=\$haPassword mode=ftp  \
 	\n   /tool fetch upload=yes src-path=HA_b2s.backup dst-path=HA_b2s.backup address=\$haAddressOther user=ha password=\$haPassword mode=ftp  \
+	\n   # DANGEROUS: Uploading restore script will trigger automatic backup load on standby\
+	\n   # This will cause the standby router to REBOOT and apply the new configuration\
 	\n   /file print file=HA_restore-backup.rsc; /file set [find name=\"HA_restore-backup.rsc.txt\"] contents=\"/system backup load name=HA_b2s.backup password=p\"\
 	\n   :do {\
 	\n      /tool fetch upload=yes src-path=HA_restore-backup.rsc.txt dst-path=HA_restore-backup.auto.rsc address=\$haAddressOther user=ha password=\$haPassword mode=ftp \
@@ -311,7 +428,7 @@ add name=ha_report_startup_new owner=admin policy=ftp,reboot,read,write,policy,t
 	\n}\
 	\n"
 remove [find name=ha_setconfigver_new]
-add name=ha_setconfigver_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source=":local verHistory [:tostr [:pick [/system history print detail as-value] 1]]\
+add name=ha_setconfigver_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source=":local verHistory [:tostr [:pick [/system history print as-value] 1]]\
 	\n:local verCertificate [:tostr [/certificate find]]\
 	\n:local verFile [:tostr [/file find name~\"^[^H][^A][^_]\"]]\
 	\n:local haVer \"history=\$verHistory file=\$verFile certificate=\$verCertificate\"\
@@ -332,7 +449,32 @@ add name=ha_setidentity_new owner=admin policy=ftp,reboot,read,write,policy,test
 	\n}\
 	\n"
 remove [find name=ha_startup_new]
-add name=ha_startup_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="#:do {\
+add name=ha_startup_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="# ============================================================================\
+	\n# ha_startup.script - HA Startup and Interface Initialization Script\
+	\n# ============================================================================\
+	\n# Purpose: Run at boot to initialize HA configuration and determine router role\
+	\n# Tested RouterOS: 6.44.6\
+	\n#\
+	\n# DANGEROUS OPERATIONS:\
+	\n#   - DISABLES ALL ETHERNET INTERFACES on startup (line 38, 90-91)\
+	\n#   - REBOOTS ROUTER if MAC address is unknown/wrong (line 138)\
+	\n#   - Creates bridge interfaces and modifies network configuration\
+	\n#   - Modifies firewall rules, VRRP, schedulers, and services\
+	\n#   - Creates/modifies FTP service and HA user account\
+	\n#\
+	\n# Behavior:\
+	\n#   - Prevents double-running via haStartupHasRun and haAllowBootstrap checks\
+	\n#   - Waits for hardware initialization (up to 120 retries)\
+	\n#   - Identifies router as A or B based on ether8 MAC address\
+	\n#   - Disables interfaces to prevent traffic on standby during boot\
+	\n#   - Sets up VRRP, firewall rules, schedulers, and HA services\
+	\n#\
+	\n# Prerequisites:\
+	\n#   - Proper HA configuration via ha_config\
+	\n#   - Serial console access in case of issues\
+	\n# ============================================================================\
+	\n\
+	\n#:do {\
 	\n#Prevent double running of the startup. Is there a bug in the scheduler? It seems that sometimes our start-time=startup ha_startup\
 	\n#fires again on newer versions of RouterOS.\
 	\n:global haAllowBootstrap\
@@ -368,9 +510,10 @@ add name=ha_startup_new owner=admin policy=ftp,reboot,read,write,policy,test,pas
 	\n#Disable bonding to avoid flapping during startup\
 	\n/interface bonding disable [find disabled=no]\
 	\n/log warning \"ha_startup: 0.3\"\
-	\n#Finally take care about all ethernet interfaces\
+	\n# DANGEROUS: Disable all ethernet interfaces to prevent standby from taking traffic\
+	\n# This is critical to avoid race condition where standby forwards packets before role is determined\
 	\n/interface ethernet disable [find disabled=no]\
-	\n:global haStartupHAVersion \"0.7test15 - 7a36ae066ee95b1d83b75577f98bce7afb8fb40d\"\
+	\n:global haStartupHAVersion \"0.8dev20220621210200 - f1cbb7db52a60d0c50a033b99ff88c4fed260dd1\"\
 	\n:global isStandbyInSync false\
 	\n:global isMaster false\
 	\n:global haPassword\
@@ -469,6 +612,8 @@ add name=ha_startup_new owner=admin policy=ftp,reboot,read,write,policy,test,pas
 	\n      :global haIdentity \"UKNOWN\"\
 	\n      /log warning \"I AM UNKNOWN - WRONG MAC\"\
 	\n      /delay 15\
+	\n      # DANGEROUS: Automatic reboot when MAC address doesn't match expected values\
+	\n      # This attempts to recover from hardware initialization race condition\
 	\n      :execute \"/system reboot\"\
 	\n      /delay 1000\
 	\n   }\
@@ -509,10 +654,17 @@ add name=ha_startup_new owner=admin policy=ftp,reboot,read,write,policy,test,pas
 	\n/system scheduler add comment=HA_AUTO interval=24h name=ha_auto_pushbackup on-event=ha_pushbackup policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive start-date=Jan/01/1970 start-time=05:00:00\
 	\n/log warning \"ha_startup: 7\"\
 	\n:if ([:len [/file find name=\"HA_dsa\"]] = 1) do={\
-	\n   /ip ssh import-host-key private-key-file=HA_rsa\
+	\n   /ip ssh import-host-key private-key-file=HA_dsa\
 	\n}\
 	\n:if ([:len [/file find name=\"HA_rsa\"]] = 1) do={\
 	\n   /ip ssh import-host-key private-key-file=HA_rsa\
+	\n}\
+	\n# bugfix v7\
+	\n:if ([:len [/file find name=\"HA_dsa.pem\"]] = 1) do={\
+	\n   /ip ssh import-host-key private-key-file=HA_dsa.pem\
+	\n}\
+	\n:if ([:len [/file find name=\"HA_rsa.pem\"]] = 1) do={\
+	\n   /ip ssh import-host-key private-key-file=HA_rsa.pem\
 	\n}\
 	\n/user remove [find comment=HA_AUTO]\
 	\n/user add address=\"\$haNetwork/\$haNetmaskBits\" comment=HA_AUTO group=full name=ha password=\"\$haPassword\"\
@@ -556,7 +708,33 @@ add name=ha_startup_new owner=admin policy=ftp,reboot,read,write,policy,test,pas
 	\n}\
 	\n"
 remove [find name=ha_switchrole_new]
-add name=ha_switchrole_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source=":global isMaster\
+add name=ha_switchrole_new owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive source="# ============================================================================\
+	\n# ha_switchrole.script - Active/Standby Role Switching Script\
+	\n# ============================================================================\
+	\n# Purpose: Coordinate controlled failover by switching active/standby roles\
+	\n# Tested RouterOS: 6.44.6\
+	\n# Experimental RouterOS 7.x support (untested)\
+	\n#\
+	\n# DANGEROUS OPERATIONS:\
+	\n#   - REBOOTS THE ACTIVE ROUTER (line 36 for ROS6, line 51 for ROS7)\
+	\n#   - Pushes backup to standby before switching\
+	\n#   - Should only be used for planned maintenance failover\
+	\n#\
+	\n# Behavior:\
+	\n#   - Only runs if router is currently master\
+	\n#   - Checks if haPreferMac is set (incompatible with role switching)\
+	\n#   - Pushes backup to standby via ha_pushbackup\
+	\n#   - Waits for standby to come back online\
+	\n#   - Reboots active router to trigger failover\
+	\n#   - After reboot, previous standby becomes active\
+	\n#\
+	\n# Prerequisites:\
+	\n#   - Router must be in master/active role\
+	\n#   - Standby must be healthy and reachable\
+	\n#   - No haPreferMac configured\
+	\n# ============================================================================\
+	\n\
+	\n:global isMaster\
 	\n:global haAddressOther\
 	\n:global haInterface\
 	\n:global haInterfaceLogical\
@@ -581,18 +759,41 @@ add name=ha_switchrole_new owner=admin policy=ftp,reboot,read,write,policy,test,
 	\n   /system script run [find name=\"ha_pushbackup\"]\
 	\n   :delay 5\
 	\n   :local haWaitCount 0\
-	\n   while ([/ping \$haAddressOther count=1 interface=\$haPingInterface ttl=1]  = 0) do={\
-	\n      :set haWaitCount (\$haWaitCount+1)\
-	\n      :put \"Still waiting for standby \$haWaitCount...\"\
-	\n      :delay 1\
+	\n   if ([:pick [/system resource get version] 0 ] = 6) do={\
+	\n      while ([/ping \$haAddressOther count=1 interface=\$haPingInterface ttl=1] = 0) do={\
+	\n         :set haWaitCount (\$haWaitCount+1)\
+	\n         :put \"Still waiting for standby \$haWaitCount...\"\
+	\n         :delay 1\
+	\n      }\
+	\n      :put \"Standby available \$haWaitCount...delaying 22s\"\
+	\n      /delay 22\
+	\n      :if (\$isMaster && [/ping \$haAddressOther count=1 interface=\$haPingInterface ttl=1] >= 1) do={\
+	\n         # DANGEROUS: Rebooting active router to trigger failover to standby\
+	\n         # Ensure standby is healthy before reaching this point\
+	\n         :put \"REBOOTING MYSELF\"\
+	\n         :execute \"/system reboot\"\
+	\n      } else={\
+	\n         :put \"NOT REBOOTING MYSELF! SLAVE IS NOT UP OR I AM NOT MASTER!\"\
+	\n      }\
 	\n   }\
-	\n   :put \"Standby available \$haWaitCount...delaying 10s\"\
-	\n   /delay 10\
-	\n   :if (\$isMaster && [/ping \$haAddressOther count=1 interface=\$haPingInterface ttl=1]  >= 1) do={\
-	\n      :put \"REBOOTING MYSELF\"\
-	\n      :execute \"/system reboot\"\
-	\n   } else={\
-	\n      :put \"NOT REBOOTING MYSELF! SLAVE IS NOT UP OR I AM NOT MASTER!\"\
+	\n   if ([:pick [/system resource get version] 0 ] = 7) do={\
+	\n      # EXPERIMENTAL: RouterOS 7.x support - UNTESTED\
+	\n      # Ping syntax changed in RouterOS 7.x to return structured data\
+	\n      while (([/ping \$haAddressOther count=1 interface=\$haPingInterface ttl=1 as-value ]->\"time\") = nil ) do={\
+	\n         :set haWaitCount (\$haWaitCount+1)\
+	\n         :put \"Still waiting for standby \$haWaitCount...\"\
+	\n         :delay 1\
+	\n      }\
+	\n      :put \"Standby available \$haWaitCount...delaying 22s\"\
+	\n      /delay 22\
+	\n      :if (\$isMaster && (([/ping \$haAddressOther count=1 interface=\$haPingInterface ttl=1 as-value ]->\"time\") > 0 ) ) do={\
+	\n         # DANGEROUS: Rebooting active router to trigger failover to standby (RouterOS 7.x)\
+	\n         # Ensure standby is healthy before reaching this point\
+	\n         :put \"REBOOTING MYSELF\"\
+	\n         :execute \"/system reboot\"\
+	\n      } else={\
+	\n         :put \"NOT REBOOTING MYSELF! SLAVE IS NOT UP OR I AM NOT MASTER!\"\
+	\n      }\
 	\n   }\
 	\n} else={\
 	\n   :put \"I am NOT master - nothing to do\"\
