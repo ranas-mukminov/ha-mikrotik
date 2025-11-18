@@ -5,6 +5,43 @@ code_checksum="$(cat scripts/*.script | openssl sha1 | awk '{print $2}')"
 ha_version="$version - $code_checksum"
 ha_password="$(egrep 'haMacA|haMacB' scripts/ha_config.script | awk '{print $3}' | cut -d '"' -f2 | openssl sha1 | awk '{print $2}')"
 (
+# Print header comment block
+cat << 'HEADER'
+# ============================================================================
+# ha-mikrotik HA_init.rsc - MikroTik High Availability Initialization Script
+# ============================================================================
+#
+# Purpose: Bootstrap and configure high availability for a pair of MikroTik routers
+#
+# Tested RouterOS Version: 6.44.6
+# Hardware: CCR1009-8g-1s-1s+ (other models may work but are untested)
+#
+# WARNING: This script performs dangerous operations including:
+#   - Creating/modifying system scripts with full policy permissions
+#   - Resetting configuration (via ha_install and related scripts)
+#   - Rebooting devices (via ha_switchrole and ha_startup)
+#   - Removing files (via ha_pushbackup)
+#   - Modifying network interfaces, VRRP, and routing
+#
+# REQUIREMENTS:
+#   - Out-of-band serial console access to both routers
+#   - Valid external backups of all configurations
+#   - Lab environment for testing before production use
+#   - Understanding of RouterOS scripting, VRRP, and MAC cloning
+#
+# DO NOT run this on production routers without extensive lab testing.
+# Misconfiguration can result in complete loss of device configuration.
+#
+# Usage:
+#   1. Upload this file to your MikroTik router
+#   2. Import: /import HA_init.rsc
+#   3. Install: $HAInstall interface="ether8" macA="[MAC_A]" macB="[MAC_B]" password="[PASSWORD]"
+#   4. Follow on-screen instructions for bootstrapping secondary router
+#
+# Version: %%%HA_VERSION%%%
+# ============================================================================
+
+HEADER
 echo ":do {"
 cd scripts
 echo "/system script"

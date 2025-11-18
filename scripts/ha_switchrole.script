@@ -1,3 +1,29 @@
+# ============================================================================
+# ha_switchrole.script - Active/Standby Role Switching Script
+# ============================================================================
+# Purpose: Coordinate controlled failover by switching active/standby roles
+# Tested RouterOS: 6.44.6
+# Experimental RouterOS 7.x support (untested)
+#
+# DANGEROUS OPERATIONS:
+#   - REBOOTS THE ACTIVE ROUTER (line 36 for ROS6, line 51 for ROS7)
+#   - Pushes backup to standby before switching
+#   - Should only be used for planned maintenance failover
+#
+# Behavior:
+#   - Only runs if router is currently master
+#   - Checks if haPreferMac is set (incompatible with role switching)
+#   - Pushes backup to standby via ha_pushbackup
+#   - Waits for standby to come back online
+#   - Reboots active router to trigger failover
+#   - After reboot, previous standby becomes active
+#
+# Prerequisites:
+#   - Router must be in master/active role
+#   - Standby must be healthy and reachable
+#   - No haPreferMac configured
+# ============================================================================
+
 :global isMaster
 :global haAddressOther
 :global haInterface
@@ -32,6 +58,8 @@
       :put "Standby available $haWaitCount...delaying 22s"
       /delay 22
       :if ($isMaster && [/ping $haAddressOther count=1 interface=$haPingInterface ttl=1] >= 1) do={
+         # DANGEROUS: Rebooting active router to trigger failover to standby
+         # Ensure standby is healthy before reaching this point
          :put "REBOOTING MYSELF"
          :execute "/system reboot"
       } else={
@@ -39,6 +67,8 @@
       }
    }
    if ([:pick [/system resource get version] 0 ] = 7) do={
+      # EXPERIMENTAL: RouterOS 7.x support - UNTESTED
+      # Ping syntax changed in RouterOS 7.x to return structured data
       while (([/ping $haAddressOther count=1 interface=$haPingInterface ttl=1 as-value ]->"time") = nil ) do={
          :set haWaitCount ($haWaitCount+1)
          :put "Still waiting for standby $haWaitCount..."
@@ -47,6 +77,8 @@
       :put "Standby available $haWaitCount...delaying 22s"
       /delay 22
       :if ($isMaster && (([/ping $haAddressOther count=1 interface=$haPingInterface ttl=1 as-value ]->"time") > 0 ) ) do={
+         # DANGEROUS: Rebooting active router to trigger failover to standby (RouterOS 7.x)
+         # Ensure standby is healthy before reaching this point
          :put "REBOOTING MYSELF"
          :execute "/system reboot"
       } else={

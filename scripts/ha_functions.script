@@ -1,3 +1,21 @@
+# ============================================================================
+# ha_functions.script - Global HA Function Definitions
+# ============================================================================
+# Purpose: Define global functions for HA operations
+# Tested RouterOS: 6.44.6
+#
+# Functions defined:
+#   $HADebug - Log debug messages
+#   $HAPushStandby - Push HA code and configuration to standby
+#   $HASyncStandby - Synchronize configuration to standby
+#   $HAInstall - Install HA on both routers
+#   $HASwitchRole - Switch active/standby roles
+#   $HALoopPushStandby - Continuously push to standby (testing)
+#
+# These functions are entry points for HA operations and should be
+# called from the RouterOS terminal after importing HA_init.rsc
+# ============================================================================
+
 :global HADebug do={
    :put $1
    /log warning $1

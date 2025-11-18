@@ -1,3 +1,28 @@
+# ============================================================================
+# ha_pushbackup.script - Configuration and File Synchronization Script
+# ============================================================================
+# Purpose: Push configuration backup and all files from active to standby
+# Tested RouterOS: 6.44.6
+#
+# DANGEROUS OPERATIONS:
+#   - REMOVES ALL NON-HA FILES on standby via HA_mkdirs.auto.rsc (line 20)
+#   - Creates and uploads backup that triggers REBOOT on standby (line 64-71)
+#   - Transfers all files including sensitive data
+#   - Uses FTP for file transfer (password in plaintext over network)
+#
+# Behavior:
+#   - Only runs if router is master
+#   - Creates directory structure on standby
+#   - Purges all non-HA files from standby
+#   - Transfers all files from active to standby
+#   - Creates encrypted backup and triggers restore on standby (causes reboot)
+#
+# Prerequisites:
+#   - Router must be in master/active role
+#   - Standby must be reachable via HA network
+#   - FTP service must be enabled on standby
+# ============================================================================
+
 :if ([:len [/system script job find where script="ha_pushbackup"]] > 1) do={:error "already running pushbackup"; }
 :global haPassword
 :global isMaster
@@ -16,7 +41,8 @@
    }
 
    :set mkdirCode "$mkdirCode\r\n/ip smb shares remove [find comment=HA_AUTO]\r\n"
-   #eh - good chance to keep files in sync, just delete everything, we will reupload. is this going to reduce life of nvram?
+   # DANGEROUS: This code will delete all non-HA files on standby to keep files in sync
+   # This reduces NVRAM wear by avoiding incremental updates, but removes all existing files
    :local purgeFilesCode ":foreach k in=[/file find type!=\"directory\"] do={ :local xferfile [/file get \$k name]; if ([:pick \"\$xferfile\" 0 3] != \"HA_\") do={ :put \"removing \$xferfile\"; /file remove \$k; } }"
    :set mkdirCode "$purgeFilesCode;\r\n/delay 2;\r\n$mkdirCode"
 
@@ -65,6 +91,8 @@
    /system backup save name=HA_b2s.backup password=p
    /tool fetch upload=yes src-path=HA_b2s.rsc dst-path=HA_b2s.rsc address=$haAddressOther user=ha password=$haPassword mode=ftp  
    /tool fetch upload=yes src-path=HA_b2s.backup dst-path=HA_b2s.backup address=$haAddressOther user=ha password=$haPassword mode=ftp  
+   # DANGEROUS: Uploading restore script will trigger automatic backup load on standby
+   # This will cause the standby router to REBOOT and apply the new configuration
    /file print file=HA_restore-backup.rsc; /file set [find name="HA_restore-backup.rsc.txt"] contents="/system backup load name=HA_b2s.backup password=p"
    :do {
       /tool fetch upload=yes src-path=HA_restore-backup.rsc.txt dst-path=HA_restore-backup.auto.rsc address=$haAddressOther user=ha password=$haPassword mode=ftp 

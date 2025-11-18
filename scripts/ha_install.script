@@ -1,3 +1,20 @@
+# ============================================================================
+# ha_install.script - HA Installation and Bootstrap Script
+# ============================================================================
+# Purpose: Install and bootstrap HA configuration on both routers
+# Tested RouterOS: 6.44.6
+#
+# DANGEROUS OPERATIONS:
+#   - Creates backup before HA installation (HA_backup_beforeHA.backup)
+#   - Runs ha_startup which can disable interfaces and modify network config
+#   - Requires both routers to be factory reset before first use
+#
+# Prerequisites:
+#   - Both routers factory reset
+#   - ether8 (or specified interface) connected between routers
+#   - Out-of-band access available
+# ============================================================================
+
 /system script run [find name="ha_config"]
 :global haPassword
 :global haInterface
